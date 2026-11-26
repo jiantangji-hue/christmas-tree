@@ -1,0 +1,634 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<meta name="theme-color" content="#05070a" />
+<title>Merry Christmas · christmas-tree v17.6</title>
+<meta name="description" content="An interactive 3D Christmas tree — drag to rotate, scroll to zoom." />
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='78' font-size='78'>🎄</text></svg>" />
+<style>
+  :root{
+    --gold:#e9c67c;
+    --gold-light:#fff3cf;
+    --gold-deep:#b98b3d;
+    --ink:#f3efe6;
+  }
+  *{box-sizing:border-box;}
+  html,body{height:100%;margin:0;}
+  body{
+    background:
+      radial-gradient(120% 85% at 50% 6%, #121a23 0%, #0a0f15 42%, #04060a 100%);
+    color:var(--ink);
+    font-family:"Didot","Bodoni MT","Playfair Display",Georgia,"Songti SC","Noto Serif SC","Times New Roman",serif;
+    overflow:hidden;
+    -webkit-font-smoothing:antialiased;
+    text-rendering:optimizeLegibility;
+  }
+  #scene{position:fixed;inset:0;width:100%;height:100%;display:block;touch-action:none;cursor:grab;}
+  #scene.dragging{cursor:grabbing;}
+  .vignette{
+    position:fixed;inset:0;pointer-events:none;
+    background:radial-gradient(125% 95% at 50% 44%, rgba(0,0,0,0) 40%, rgba(0,0,0,.62) 100%);
+  }
+  .tag{
+    position:fixed;top:22px;left:26px;
+    font-size:11px;letter-spacing:.32em;text-transform:uppercase;
+    color:rgba(233,198,124,.62);pointer-events:none;user-select:none;
+  }
+  .tag span{color:rgba(255,243,207,.9);}
+  .hint{
+    position:fixed;top:22px;right:26px;
+    font-size:11px;letter-spacing:.18em;color:rgba(255,255,255,.34);
+    pointer-events:none;user-select:none;
+  }
+  .copy{
+    position:fixed;left:0;right:0;bottom:132px;
+    text-align:center;pointer-events:none;
+    padding:0 24px;
+  }
+  .copy h1{
+    margin:0;font-size:clamp(30px,5.4vw,58px);font-weight:400;line-height:1.06;
+    letter-spacing:.03em;
+    background:linear-gradient(178deg,#fffdf5 6%,#f5dda8 42%,#e2b566 68%,#a9762c 100%);
+    -webkit-background-clip:text;background-clip:text;color:transparent;
+    filter:drop-shadow(0 0 26px rgba(233,198,124,.22));
+    background-size:100% 220%;
+    animation:sheen 9s ease-in-out infinite;
+  }
+  @keyframes sheen{
+    0%,100%{background-position:50% 0%;}
+    50%{background-position:50% 100%;}
+  }
+  .copy .sub{
+    margin:14px auto 0;max-width:26em;
+    font-size:clamp(12px,1.5vw,15px);letter-spacing:.22em;
+    color:rgba(243,239,230,.62);
+  }
+  .controls{
+    position:fixed;left:50%;bottom:34px;transform:translateX(-50%);
+    display:flex;gap:10px;flex-wrap:wrap;justify-content:center;
+    padding:0 16px;
+  }
+  .controls button{
+    appearance:none;border:1px solid rgba(233,198,124,.26);
+    background:rgba(255,255,255,.045);
+    backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);
+    color:rgba(255,247,229,.86);
+    font-family:inherit;font-size:12px;letter-spacing:.16em;
+    padding:9px 16px;border-radius:999px;cursor:pointer;
+    transition:border-color .25s ease,background .25s ease,color .25s ease,transform .2s ease;
+    white-space:nowrap;
+  }
+  .controls button:hover{border-color:rgba(233,198,124,.6);background:rgba(233,198,124,.1);transform:translateY(-1px);}
+  .controls button:active{transform:translateY(0);}
+  .controls button.off{color:rgba(255,247,229,.4);border-color:rgba(255,255,255,.12);}
+  @media (max-width:560px){
+    .copy{bottom:120px;}
+    .copy .sub{letter-spacing:.14em;}
+    .hint{display:none;}
+    .controls{gap:8px;bottom:26px;}
+    .controls button{font-size:11px;padding:8px 13px;letter-spacing:.1em;}
+    .tag{top:16px;left:18px;font-size:10px;}
+  }
+  @media (prefers-reduced-motion:reduce){
+    .copy h1{animation:none;}
+  }
+</style>
+</head>
+<body>
+<canvas id="scene" aria-label="Interactive Christmas tree"></canvas>
+<div class="vignette"></div>
+
+<div class="tag">christmas-tree <span>v17.6</span></div>
+<div class="hint">拖动旋转 · 滚轮缩放</div>
+
+<div class="copy">
+  <h1>Merry Christmas</h1>
+  <p class="sub">愿灯火长明 · 愿你所念之人皆平安</p>
+</div>
+
+<div class="controls">
+  <button id="btnSpin" type="button" aria-pressed="true">自动旋转</button>
+  <button id="btnSnow" type="button" aria-pressed="true">飘雪</button>
+  <button id="btnReset" type="button">重置视角</button>
+  <button id="btnSave" type="button">保存图片</button>
+</div>
+
+<script>
+(function () {
+  'use strict';
+
+  var canvas = document.getElementById('scene');
+  var ctx = canvas.getContext('2d');
+  var W = 0, H = 0, DPR = 1;
+  var viewScale = 1;
+
+  var rotY = -0.55, tilt = 0.15, zoom = 1;
+  var autoSpin = true, snowOn = true;
+  var vel = 0.0;
+  var dragging = false, lastX = 0, lastMoveT = 0;
+
+  var TREE = { h: 330, r: 114 };
+  var yTop = -TREE.h / 2, yBot = TREE.h / 2;
+  var CAM = 780, FOCAL = 780;
+
+  function coneR(t) { return TREE.r * Math.pow(t, 0.92); }
+
+  /* ---------- glow sprites ---------- */
+  function glowSprite(rgb, size) {
+    var c = document.createElement('canvas');
+    c.width = c.height = size;
+    var g = c.getContext('2d');
+    var grad = g.createRadialGradient(size / 2, size / 2, 0, size / 2, size / 2, size / 2);
+    grad.addColorStop(0, 'rgba(' + rgb + ',1)');
+    grad.addColorStop(0.32, 'rgba(' + rgb + ',0.46)');
+    grad.addColorStop(0.66, 'rgba(' + rgb + ',0.11)');
+    grad.addColorStop(1, 'rgba(' + rgb + ',0)');
+    g.fillStyle = grad;
+    g.fillRect(0, 0, size, size);
+    return c;
+  }
+
+  var SP = {
+    pine: glowSprite('24,88,55', 64),
+    pine2: glowSprite('62,156,102', 64),
+    gold: glowSprite('255,205,118', 64),
+    white: glowSprite('255,248,232', 64),
+    red: glowSprite('255,92,84', 64),
+    silver: glowSprite('196,222,255', 64)
+  };
+  var SPRITE_KEYS = { gold: 'gold', white: 'white', red: 'red', silver: 'silver' };
+
+  /* ---------- geometry ---------- */
+  var needles = [];
+  var lights = [];
+  var ornaments = [];
+  var tinsel = [];
+
+  function buildScene() {
+    needles = [];
+    lights = [];
+    ornaments = [];
+    tinsel = [];
+
+    var i, t, y, rr, a;
+
+    for (i = 0; i < 1700; i++) {
+      t = Math.pow(Math.random(), 0.62);
+      y = yTop + t * TREE.h + (Math.random() - 0.5) * 10;
+      rr = coneR(t) * (0.44 + 0.56 * Math.random());
+      a = Math.random() * Math.PI * 2;
+      needles.push({
+        x: Math.cos(a) * rr,
+        y: y,
+        z: Math.sin(a) * rr,
+        r: 1.0 + Math.random() * 1.7,
+        ph: Math.random() * 6.283,
+        sp: 0.5 + Math.random() * 1.3,
+        bright: Math.random() < 0.3
+      });
+    }
+
+    var lightCols = ['gold', 'white', 'red'];
+    for (i = 0; i < 250; i++) {
+      t = (i + 0.5) / 250;
+      a = t * Math.PI * 2 * 3.4 + 0.4 + (Math.random() - 0.5) * 2.0;
+      rr = coneR(t) * (0.9 + Math.random() * 0.14);
+      y = yTop + t * TREE.h;
+      lights.push({
+        x: Math.cos(a) * rr,
+        y: y,
+        z: Math.sin(a) * rr,
+        c: lightCols[i % 3 === 0 ? 0 : (i % 5 === 0 ? 2 : 1)],
+        r: 1.0 + Math.random() * 0.8,
+        ph: Math.random() * 6.283,
+        sp: 1.3 + Math.random() * 2.3
+      });
+    }
+
+    var pal = ['gold', 'red', 'silver', 'white'];
+    for (i = 0; i < 22; i++) {
+      t = 0.12 + Math.random() * 0.82;
+      rr = coneR(t) * 1.02;
+      a = Math.random() * Math.PI * 2;
+      ornaments.push({
+        x: Math.cos(a) * rr,
+        y: yTop + t * TREE.h,
+        z: Math.sin(a) * rr,
+        c: pal[Math.floor(Math.random() * pal.length)],
+        r: 2.6 + Math.random() * 1.8,
+        ph: Math.random() * 6.283
+      });
+    }
+
+    for (i = 0; i <= 220; i++) {
+      t = i / 220;
+      a = t * Math.PI * 2 * 5;
+      rr = coneR(t) * 1.012;
+      tinsel.push({ x: Math.cos(a) * rr, y: yTop + t * TREE.h, z: Math.sin(a) * rr });
+    }
+  }
+  buildScene();
+
+  /* ---------- gifts ---------- */
+  var gifts = [
+    { x: -80, z: 44, y: yBot + 2, w: 44, h: 30, d: 30, base: '#1f5e3d', lid: '#18492f', side: 'rgba(4,20,12,0.75)', rib: '#e9c67c' },
+    { x: -8, z: 70, y: yBot + 5, w: 36, h: 24, d: 26, base: '#8c2f3a', lid: '#6b222b', side: 'rgba(24,6,8,0.75)', rib: '#f7e3b6' },
+    { x: 66, z: 36, y: yBot + 2, w: 32, h: 22, d: 24, base: '#2b3f6a', lid: '#1f2f51', side: 'rgba(6,10,20,0.78)', rib: '#e9c67c' }
+  ];
+
+  /* ---------- snow ---------- */
+  var flakes = [];
+  function newFlake(scatter) {
+    return {
+      x: Math.random(),
+      y: scatter ? Math.random() : -0.08,
+      z: Math.random(),
+      s: 0.8 + Math.random() * 2.0,
+      v: 0.014 + Math.random() * 0.05,
+      drift: (Math.random() - 0.5) * 0.035,
+      ph: Math.random() * 6.283
+    };
+  }
+  function buildSnow() {
+    flakes = [];
+    for (var i = 0; i < 170; i++) flakes.push(newFlake(true));
+  }
+  buildSnow();
+
+  /* ---------- resize ---------- */
+  function resize() {
+    DPR = Math.min(window.devicePixelRatio || 1, 2);
+    W = window.innerWidth;
+    H = window.innerHeight;
+    canvas.width = Math.floor(W * DPR);
+    canvas.height = Math.floor(H * DPR);
+    canvas.style.width = W + 'px';
+    canvas.style.height = H + 'px';
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    viewScale = Math.min(H / 720, W / 400);
+    layoutCopy();
+  }
+  window.addEventListener('resize', resize);
+
+  /* ---------- projection ---------- */
+  var out = { x: 0, y: 0, k: 1, d: 0 };
+  var cosY = 1, sinY = 0, cosT = 1, sinT = 0, K = 1, ox = 0, oy = 0;
+
+  function proj(x, y, z, o) {
+    var X = x * cosY - z * sinY;
+    var Z = x * sinY + z * cosY;
+    var Y = y * cosT - Z * sinT;
+    var Zc = y * sinT + Z * cosT + CAM;
+    var k = (FOCAL * K) / Zc;
+    o.x = X * k + ox;
+    o.y = Y * k + oy;
+    o.k = k;
+    o.d = Zc;
+    return o;
+  }
+
+  function drawSprite(img, x, y, size, alpha) {
+    if (alpha <= 0.01 || size < 0.4) return;
+    ctx.globalAlpha = alpha > 1 ? 1 : alpha;
+    ctx.drawImage(img, x - size / 2, y - size / 2, size, size);
+  }
+
+  /* ---------- star ---------- */
+  function drawStar(cx, cy, R, rot, pulse) {
+    var grad = ctx.createRadialGradient(cx, cy, 0, cx, cy, R * 2.4);
+    grad.addColorStop(0, 'rgba(255,246,214,' + (0.95 * pulse) + ')');
+    grad.addColorStop(0.35, 'rgba(255,214,130,' + (0.42 * pulse) + ')');
+    grad.addColorStop(1, 'rgba(255,190,90,0)');
+    ctx.globalAlpha = 1;
+    ctx.fillStyle = grad;
+    ctx.beginPath();
+    ctx.arc(cx, cy, R * 2.4, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.beginPath();
+    for (var i = 0; i < 10; i++) {
+      var ang = rot + i * Math.PI / 5 - Math.PI / 2;
+      var rad = (i % 2 === 0 ? R : R * 0.46);
+      var px = cx + Math.cos(ang) * rad;
+      var py = cy + Math.sin(ang) * rad;
+      if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+    }
+    ctx.closePath();
+    var fill = ctx.createLinearGradient(cx, cy - R, cx, cy + R);
+    fill.addColorStop(0, 'rgba(255,253,240,' + (0.98 * pulse) + ')');
+    fill.addColorStop(0.55, 'rgba(255,224,150,' + (0.9 * pulse) + ')');
+    fill.addColorStop(1, 'rgba(214,158,68,' + (0.75 * pulse) + ')');
+    ctx.fillStyle = fill;
+    ctx.fill();
+
+    ctx.strokeStyle = 'rgba(255,248,224,' + (0.35 * pulse) + ')';
+    ctx.lineWidth = Math.max(0.6, R / 28);
+    ctx.stroke();
+  }
+
+  function drawFlares(cx, cy, len, alpha) {
+    ctx.globalAlpha = alpha;
+    var g1 = ctx.createLinearGradient(cx - len, cy, cx + len, cy);
+    g1.addColorStop(0, 'rgba(255,226,160,0)');
+    g1.addColorStop(0.5, 'rgba(255,240,200,0.55)');
+    g1.addColorStop(1, 'rgba(255,226,160,0)');
+    ctx.strokeStyle = g1;
+    ctx.lineWidth = 1.1;
+    ctx.beginPath();
+    ctx.moveTo(cx - len, cy);
+    ctx.lineTo(cx + len, cy);
+    ctx.stroke();
+
+    var g2 = ctx.createLinearGradient(cx, cy - len, cx, cy + len);
+    g2.addColorStop(0, 'rgba(255,226,160,0)');
+    g2.addColorStop(0.5, 'rgba(255,240,200,0.45)');
+    g2.addColorStop(1, 'rgba(255,226,160,0)');
+    ctx.strokeStyle = g2;
+    ctx.beginPath();
+    ctx.moveTo(cx, cy - len);
+    ctx.lineTo(cx, cy + len);
+    ctx.stroke();
+  }
+
+  /* ---------- gifts ---------- */
+  function drawGift(g, time) {
+    var p = proj(g.x, g.y, g.z, out);
+    var k = p.k;
+    var w = g.w * k, h = g.h * k, d = g.d * k * 0.5;
+    var x = p.x, y = p.y;
+
+    drawSprite(SP.gold, x, y - h * 0.45, (w + h) * 1.9, 0.05);
+
+    ctx.globalAlpha = 1;
+
+    /* top face */
+    ctx.fillStyle = g.lid;
+    ctx.beginPath();
+    ctx.moveTo(x - w / 2, y - h);
+    ctx.lineTo(x - w / 2 + d, y - h - d * 0.6);
+    ctx.lineTo(x + w / 2 + d, y - h - d * 0.6);
+    ctx.lineTo(x + w / 2, y - h);
+    ctx.closePath();
+    ctx.fill();
+
+    /* right side */
+    ctx.fillStyle = g.side;
+    ctx.beginPath();
+    ctx.moveTo(x + w / 2, y - h);
+    ctx.lineTo(x + w / 2 + d, y - h - d * 0.6);
+    ctx.lineTo(x + w / 2 + d, y - d * 0.6);
+    ctx.lineTo(x + w / 2, y);
+    ctx.closePath();
+    ctx.fill();
+
+    /* front face */
+    var front = ctx.createLinearGradient(x - w / 2, y - h, x + w / 2, y);
+    front.addColorStop(0, g.base);
+    front.addColorStop(1, 'rgba(0,0,0,0.62)');
+    ctx.fillStyle = front;
+    ctx.fillRect(x - w / 2, y - h, w, h);
+
+    /* ribbon */
+    ctx.globalAlpha = 0.68;
+    ctx.strokeStyle = g.rib;
+    ctx.lineWidth = Math.max(1.2, w / 16);
+    ctx.beginPath();
+    ctx.moveTo(x, y - h);
+    ctx.lineTo(x, y);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(x - w / 2, y - h * 0.66);
+    ctx.lineTo(x + w / 2, y - h * 0.66);
+    ctx.stroke();
+
+    /* bow */
+    ctx.globalAlpha = 0.85;
+    ctx.fillStyle = g.rib;
+    var by = y - h - d * 0.5;
+    ctx.beginPath();
+    ctx.ellipse(x - w * 0.12, by, w * 0.11, h * 0.055, -0.45, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.ellipse(x + w * 0.12, by, w * 0.11, h * 0.055, 0.45, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.arc(x, by, Math.max(1.4, w * 0.035), 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.globalAlpha = 1;
+  }
+
+  /* ---------- main loop ---------- */
+  var last = performance.now();
+
+  function frame(now) {
+    var dt = Math.min(64, now - last);
+    last = now;
+    var time = now / 1000;
+
+    /* rotation dynamics */
+    if (!dragging) {
+      var target = autoSpin ? 0.0026 : 0;
+      vel += (target - vel) * Math.min(1, dt / 130);
+      rotY += vel * (dt / 16.667);
+    }
+    tilt += (0.15 + Math.sin(time * 0.18) * 0.015 - tilt) * 0.04;
+
+    if (W === 0) resize();
+    K = viewScale * zoom;
+    ox = W * 0.5;
+    oy = H * 0.40;
+    cosY = Math.cos(rotY); sinY = Math.sin(rotY);
+    cosT = Math.cos(tilt); sinT = Math.sin(tilt);
+
+    ctx.clearRect(0, 0, W, H);
+    ctx.globalCompositeOperation = 'lighter';
+
+    /* ground bloom */
+    var groundGrad = ctx.createRadialGradient(W * 0.5, H * 0.40 + yBot * K * cosT, 0, W * 0.5, H * 0.40 + yBot * K * cosT, TREE.r * K * 2.2);
+    groundGrad.addColorStop(0, 'rgba(233,198,124,0.10)');
+    groundGrad.addColorStop(0.55, 'rgba(180,140,70,0.05)');
+    groundGrad.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.globalAlpha = 1;
+    ctx.fillStyle = groundGrad;
+    ctx.beginPath();
+    ctx.ellipse(W * 0.5, H * 0.40 + yBot * K * cosT, TREE.r * K * 2.2, TREE.r * K * 0.72, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    /* foliage */
+    var i, n, p;
+    for (i = 0; i < needles.length; i++) {
+      n = needles[i];
+      p = proj(n.x, n.y, n.z, out);
+      var depthAlpha = 1 - (p.d - CAM) / 620;
+      if (depthAlpha < 0.06) depthAlpha = 0.06;
+      var tw = 0.72 + 0.28 * Math.sin(time * n.sp + n.ph);
+      drawSprite(n.bright ? SP.pine2 : SP.pine, p.x, p.y, n.r * p.k * 3.4, depthAlpha * tw * (n.bright ? 0.66 : 0.46));
+    }
+
+    /* tinsel thread */
+    ctx.globalAlpha = 0.07;
+    ctx.strokeStyle = 'rgba(255,232,186,1)';
+    ctx.lineWidth = 0.8;
+    ctx.beginPath();
+    var first = true;
+    for (i = 0; i < tinsel.length; i += 2) {
+      p = proj(tinsel[i].x, tinsel[i].y, tinsel[i].z, out);
+      if (first) { ctx.moveTo(p.x, p.y); first = false; }
+      else ctx.lineTo(p.x, p.y);
+    }
+    ctx.stroke();
+
+    /* ornaments (far to near) */
+    for (i = 0; i < ornaments.length; i++) {
+      var o = ornaments[i];
+      p = proj(o.x, o.y, o.z, out);
+      var oa = 1 - (p.d - CAM) / 700;
+      if (oa < 0.1) oa = 0.1;
+      var size = o.r * p.k * 5.2;
+      var pulse = 0.85 + 0.15 * Math.sin(time * 0.9 + o.ph);
+      drawSprite(SP[SPRITE_KEYS[o.c]], p.x, p.y, size, oa * 0.75 * pulse);
+      drawSprite(SP.white, p.x - size * 0.12, p.y - size * 0.16, size * 0.42, oa * 0.55);
+    }
+
+    /* fairy lights */
+    for (i = 0; i < lights.length; i++) {
+      var L = lights[i];
+      p = proj(L.x, L.y, L.z, out);
+      var la = 1 - (p.d - CAM) / 700;
+      if (la < 0.08) la = 0.08;
+      var twk = 0.5 + 0.5 * Math.sin(time * L.sp + L.ph);
+      var s2 = L.r * p.k * (5 + 4 * twk);
+      drawSprite(SP[SPRITE_KEYS[L.c]], p.x, p.y, s2, la * (0.28 + 0.5 * twk));
+    }
+
+    /* star */
+    p = proj(0, yTop - 26, 0, out);
+    var starPulse = 0.9 + 0.1 * Math.sin(time * 2.1);
+    drawFlares(p.x, p.y, 78 * p.k * 0.55, 0.5 * starPulse);
+    drawStar(p.x, p.y, 15 * p.k, Math.sin(time * 0.25) * 0.05, starPulse);
+
+    /* gifts */
+    ctx.globalCompositeOperation = 'source-over';
+    for (i = 0; i < gifts.length; i++) drawGift(gifts[i], time);
+
+    /* snow */
+    if (snowOn) {
+      ctx.globalCompositeOperation = 'lighter';
+      for (i = 0; i < flakes.length; i++) {
+        var f = flakes[i];
+        if (f) {
+          f.y += f.v * (dt / 16.667) * 0.55;
+          f.x += f.drift * (dt / 16.667) * 0.4 + Math.sin(time * 0.35 + f.ph) * 0.0006;
+          if (f.y > 1.05) { flakes[i] = newFlake(false); f = flakes[i]; }
+          if (f.x < -0.1) f.x = 1.1; if (f.x > 1.1) f.x = -0.1;
+          var sx = f.x * W;
+          var sy = f.y * H;
+          var ssize = f.s * (0.7 + f.z) * 2.6;
+          drawSprite(SP.white, sx + f.z * 12, sy, ssize, 0.2 + f.z * 0.45);
+        }
+      }
+    }
+
+    ctx.globalAlpha = 1;
+    ctx.globalCompositeOperation = 'source-over';
+    requestAnimationFrame(frame);
+  }
+
+  /* ---------- interaction ---------- */
+  function pointerDown(e) {
+    dragging = true;
+    vel = 0;
+    lastX = e.clientX;
+    lastMoveT = performance.now();
+    canvas.classList.add('dragging');
+    if (canvas.setPointerCapture) {
+      try { canvas.setPointerCapture(e.pointerId); } catch (err) {}
+    }
+  }
+  function pointerMove(e) {
+    if (!dragging) return;
+    var now = performance.now();
+    var dx = e.clientX - lastX;
+    lastX = e.clientX;
+    rotY += dx * 0.008;
+    var dtm = Math.max(16, now - lastMoveT);
+    vel = Math.max(-0.14, Math.min(0.14, (dx * 0.008) / (dtm / 16.667)));
+    lastMoveT = now;
+  }
+  function pointerUp() {
+    dragging = false;
+    canvas.classList.remove('dragging');
+  }
+
+  canvas.addEventListener('pointerdown', pointerDown);
+  window.addEventListener('pointermove', pointerMove, { passive: true });
+  window.addEventListener('pointerup', pointerUp);
+  window.addEventListener('pointercancel', pointerUp);
+
+  canvas.addEventListener('wheel', function (e) {
+    e.preventDefault();
+    zoom = Math.max(0.6, Math.min(2.2, zoom - e.deltaY * 0.0012));
+  }, { passive: false });
+
+  /* ---------- buttons ---------- */
+  var btnSpin = document.getElementById('btnSpin');
+  var btnSnow = document.getElementById('btnSnow');
+  var btnReset = document.getElementById('btnReset');
+  var btnSave = document.getElementById('btnSave');
+
+  var copyEl = document.querySelector('.copy');
+
+  function layoutCopy() {
+    if (!copyEl || !W) return;
+    var K0 = viewScale * zoom;
+    var baseY = H * 0.40 + yBot * Math.cos(0.15) * K0;
+    var blockH = copyEl.offsetHeight || 110;
+    var b = Math.max(96, H - (baseY + 52) - blockH);
+    copyEl.style.bottom = b + 'px';
+  }
+
+  btnSpin.addEventListener('click', function () {
+    autoSpin = !autoSpin;
+    btnSpin.setAttribute('aria-pressed', autoSpin ? 'true' : 'false');
+    btnSpin.classList.toggle('off', !autoSpin);
+  });
+  btnSnow.addEventListener('click', function () {
+    snowOn = !snowOn;
+    btnSnow.setAttribute('aria-pressed', snowOn ? 'true' : 'false');
+    btnSnow.classList.toggle('off', !snowOn);
+  });
+  btnReset.addEventListener('click', function () {
+    rotY = -0.55;
+    zoom = 1;
+    vel = 0;
+    layoutCopy();
+  });
+  btnSave.addEventListener('click', function () {
+    var c = document.createElement('canvas');
+    c.width = canvas.width;
+    c.height = canvas.height;
+    var g = c.getContext('2d');
+    var grad = g.createRadialGradient(c.width * 0.5, c.height * 0.08, 0, c.width * 0.5, c.height * 0.08, Math.max(c.width, c.height) * 0.85);
+    grad.addColorStop(0, '#121a23');
+    grad.addColorStop(0.45, '#0a0f15');
+    grad.addColorStop(1, '#04060a');
+    g.fillStyle = grad;
+    g.fillRect(0, 0, c.width, c.height);
+    g.drawImage(canvas, 0, 0);
+    var a = document.createElement('a');
+    a.download = 'christmas-tree-v17.6.png';
+    a.href = c.toDataURL('image/png');
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+  });
+
+  resize();
+  requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>
