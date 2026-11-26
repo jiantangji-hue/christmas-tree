@@ -65,6 +65,11 @@
     font-size:clamp(12px,1.5vw,15px);letter-spacing:.22em;
     color:rgba(243,239,230,.62);
   }
+  .copy .sub2{
+    margin:10px auto 0;
+    font-size:clamp(10px,1.15vw,12px);letter-spacing:.16em;
+    color:rgba(233,198,124,.62);
+  }
   .controls{
     position:fixed;left:50%;bottom:34px;transform:translateX(-50%);
     display:flex;gap:10px;flex-wrap:wrap;justify-content:center;
@@ -101,12 +106,15 @@
 <div class="vignette"></div>
 
 <div class="tag">christmas-tree <span>v17.6</span></div>
-<div class="hint">拖动旋转 · 滚轮缩放</div>
+<div class="hint">拖动旋转 · 滚轮缩放 · 点礼物传照片</div>
 
 <div class="copy">
   <h1>Merry Christmas</h1>
   <p class="sub">愿灯火长明 · 愿你所念之人皆平安</p>
+  <p class="sub2">点一下礼物盒，换成你自己的照片</p>
 </div>
+
+<input id="photoInput" type="file" accept="image/*" hidden />
 
 <div class="controls">
   <button id="btnSpin" type="button" aria-pressed="true">自动旋转</button>
@@ -233,10 +241,79 @@
 
   /* ---------- gifts ---------- */
   var gifts = [
-    { x: -80, z: 44, y: yBot + 2, w: 44, h: 30, d: 30, base: '#1f5e3d', lid: '#18492f', side: 'rgba(4,20,12,0.75)', rib: '#e9c67c' },
-    { x: -8, z: 70, y: yBot + 5, w: 36, h: 24, d: 26, base: '#8c2f3a', lid: '#6b222b', side: 'rgba(24,6,8,0.75)', rib: '#f7e3b6' },
-    { x: 66, z: 36, y: yBot + 2, w: 32, h: 22, d: 24, base: '#2b3f6a', lid: '#1f2f51', side: 'rgba(6,10,20,0.78)', rib: '#e9c67c' }
+    { i: 0, x: -104, z: 46, y: yBot + 4, w: 80, h: 58, d: 48, base: '#1f5e3d', lid: '#18492f', side: 'rgba(4,20,12,0.75)', rib: '#e9c67c' },
+    { i: 1, x: -4, z: 82, y: yBot + 8, w: 70, h: 50, d: 42, base: '#8c2f3a', lid: '#6b222b', side: 'rgba(24,6,8,0.75)', rib: '#f7e3b6' },
+    { i: 2, x: 94, z: 40, y: yBot + 3, w: 62, h: 46, d: 38, base: '#2b3f6a', lid: '#1f2f51', side: 'rgba(6,10,20,0.78)', rib: '#e9c67c' }
   ];
+
+  /* ---------- photo gifts ---------- */
+  var PHOTO_KEY = 'christmas-tree-v17.6-photos';
+  var photos = [null, null, null];
+  var photoImgs = [null, null, null];
+  var pendingSlot = -1;
+  var hitRects = [];
+  var photoInput = document.getElementById('photoInput');
+
+  function persistPhotos() {
+    try { localStorage.setItem(PHOTO_KEY, JSON.stringify(photos)); } catch (err) {}
+  }
+
+  function setPhoto(slot, src, img) {
+    photos[slot] = src;
+    if (img) {
+      photoImgs[slot] = img;
+    } else {
+      var im = new Image();
+      im.onload = function () { photoImgs[slot] = im; };
+      im.src = src;
+    }
+  }
+
+  function restorePhotos() {
+    var saved = null;
+    try { saved = JSON.parse(localStorage.getItem(PHOTO_KEY) || '[]'); } catch (err) { saved = null; }
+    if (!saved || !saved.length) return;
+    for (var n = 0; n < 3; n++) {
+      if (saved[n]) setPhoto(n, saved[n], null);
+    }
+  }
+
+  function processPhoto(slot, file) {
+    if (!file || !/^image\//.test(file.type)) return;
+    var reader = new FileReader();
+    reader.onload = function () {
+      var im = new Image();
+      im.onload = function () {
+        var max = 560;
+        var sc = Math.min(1, max / Math.max(im.width, im.height));
+        var cw = Math.max(1, Math.round(im.width * sc));
+        var ch = Math.max(1, Math.round(im.height * sc));
+        var c = document.createElement('canvas');
+        c.width = cw; c.height = ch;
+        c.getContext('2d').drawImage(im, 0, 0, cw, ch);
+        var url;
+        try { url = c.toDataURL('image/jpeg', 0.86); } catch (err) { return; }
+        setPhoto(slot, url, c);
+        persistPhotos();
+      };
+      im.src = reader.result;
+    };
+    reader.readAsDataURL(file);
+  }
+
+  function clearPhoto(slot) {
+    photos[slot] = null;
+    photoImgs[slot] = null;
+    persistPhotos();
+  }
+
+  function drawCover(img, x, y, w, h) {
+    var iw = img.width || 1, ih = img.height || 1;
+    var r = Math.max(w / iw, h / ih);
+    var sw = w / r, sh = h / r;
+    ctx.drawImage(img, (iw - sw) / 2, (ih - sh) / 2, sw, sh, x, y, w, h);
+  }
+
 
   /* ---------- snow ---------- */
   var flakes = [];
@@ -358,8 +435,9 @@
     var k = p.k;
     var w = g.w * k, h = g.h * k, d = g.d * k * 0.5;
     var x = p.x, y = p.y;
+    var img = photoImgs[g.i];
 
-    drawSprite(SP.gold, x, y - h * 0.45, (w + h) * 1.9, 0.05);
+    drawSprite(SP.gold, x, y - h * 0.5, (w + h) * 2.0, 0.06);
 
     ctx.globalAlpha = 1;
 
@@ -383,25 +461,102 @@
     ctx.closePath();
     ctx.fill();
 
-    /* front face */
-    var front = ctx.createLinearGradient(x - w / 2, y - h, x + w / 2, y);
-    front.addColorStop(0, g.base);
-    front.addColorStop(1, 'rgba(0,0,0,0.62)');
-    ctx.fillStyle = front;
-    ctx.fillRect(x - w / 2, y - h, w, h);
+    var rect = { i: g.i, x0: x - w / 2, y0: y - h - d * 0.6, x1: x + w / 2 + d, y1: y };
 
-    /* ribbon */
-    ctx.globalAlpha = 0.68;
-    ctx.strokeStyle = g.rib;
-    ctx.lineWidth = Math.max(1.2, w / 16);
-    ctx.beginPath();
-    ctx.moveTo(x, y - h);
-    ctx.lineTo(x, y);
-    ctx.stroke();
-    ctx.beginPath();
-    ctx.moveTo(x - w / 2, y - h * 0.66);
-    ctx.lineTo(x + w / 2, y - h * 0.66);
-    ctx.stroke();
+    if (img) {
+      /* front face = uploaded photo */
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(x - w / 2, y - h, w, h);
+      ctx.clip();
+      drawCover(img, x - w / 2, y - h, w, h);
+      ctx.restore();
+
+      var vg = ctx.createLinearGradient(x - w / 2, y - h, x + w / 2, y);
+      vg.addColorStop(0, 'rgba(0,0,0,0.10)');
+      vg.addColorStop(1, 'rgba(0,0,0,0.40)');
+      ctx.fillStyle = vg;
+      ctx.fillRect(x - w / 2, y - h, w, h);
+
+      ctx.strokeStyle = 'rgba(233,198,124,0.72)';
+      ctx.lineWidth = 1;
+      ctx.strokeRect(x - w / 2 + 0.5, y - h + 0.5, w - 1, h - 1);
+
+      /* remove badge */
+      var cr = Math.max(5.5, w * 0.085);
+      var ccx = x + w / 2 - cr * 0.85, ccy = y - h + cr * 0.85;
+      ctx.globalAlpha = 0.9;
+      ctx.fillStyle = 'rgba(8,10,14,0.86)';
+      ctx.beginPath();
+      ctx.arc(ccx, ccy, cr, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = 'rgba(233,198,124,0.55)';
+      ctx.lineWidth = 1;
+      ctx.stroke();
+      ctx.strokeStyle = 'rgba(255,246,224,0.92)';
+      ctx.beginPath();
+      ctx.moveTo(ccx - cr * 0.42, ccy - cr * 0.42);
+      ctx.lineTo(ccx + cr * 0.42, ccy + cr * 0.42);
+      ctx.moveTo(ccx + cr * 0.42, ccy - cr * 0.42);
+      ctx.lineTo(ccx - cr * 0.42, ccy + cr * 0.42);
+      ctx.stroke();
+      ctx.globalAlpha = 1;
+
+      rect.cx0 = ccx - cr - 5;
+      rect.cy0 = ccy - cr - 5;
+      rect.cx1 = ccx + cr + 5;
+      rect.cy1 = ccy + cr + 5;
+      hitRects.push(rect);
+    } else {
+      /* empty wrapping paper with an upload hint */
+      var front = ctx.createLinearGradient(x - w / 2, y - h, x + w / 2, y);
+      front.addColorStop(0, g.base);
+      front.addColorStop(1, 'rgba(0,0,0,0.62)');
+      ctx.fillStyle = front;
+      ctx.fillRect(x - w / 2, y - h, w, h);
+
+      ctx.globalAlpha = 0.6;
+      ctx.strokeStyle = g.rib;
+      ctx.lineWidth = Math.max(1.2, w / 18);
+      ctx.beginPath();
+      ctx.moveTo(x, y - h);
+      ctx.lineTo(x, y);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(x - w / 2, y - h * 0.66);
+      ctx.lineTo(x + w / 2, y - h * 0.66);
+      ctx.stroke();
+      ctx.globalAlpha = 1;
+
+      /* dashed photo placeholder */
+      ctx.globalAlpha = 0.5;
+      ctx.strokeStyle = 'rgba(233,198,124,0.55)';
+      ctx.lineWidth = 1;
+      ctx.setLineDash([Math.max(2, w / 18), Math.max(2, w / 22)]);
+      ctx.strokeRect(x - w / 2 + w * 0.07, y - h + h * 0.08, w * 0.86, h * 0.84);
+      ctx.setLineDash([]);
+
+      var plus = Math.min(w, h) * 0.22;
+      var pcy = y - h * 0.56;
+      ctx.globalAlpha = 0.72;
+      ctx.strokeStyle = 'rgba(255,246,222,0.92)';
+      ctx.lineWidth = Math.max(1, w / 34);
+      ctx.beginPath();
+      ctx.moveTo(x - plus / 2, pcy);
+      ctx.lineTo(x + plus / 2, pcy);
+      ctx.moveTo(x, pcy - plus / 2);
+      ctx.lineTo(x, pcy + plus / 2);
+      ctx.stroke();
+
+      var fs = Math.max(7, Math.min(12, w / 5.2));
+      ctx.font = fs + 'px "PingFang SC","Microsoft YaHei",system-ui,sans-serif';
+      ctx.textAlign = 'center';
+      ctx.globalAlpha = 0.6;
+      ctx.fillText('上传照片', x, pcy + plus * 0.5 + fs + 4);
+      ctx.globalAlpha = 1;
+
+      hitRects.push(rect);
+    }
 
     /* bow */
     ctx.globalAlpha = 0.85;
@@ -512,6 +667,7 @@
 
     /* gifts */
     ctx.globalCompositeOperation = 'source-over';
+    hitRects.length = 0;
     for (i = 0; i < gifts.length; i++) drawGift(gifts[i], time);
 
     /* snow */
@@ -538,18 +694,53 @@
   }
 
   /* ---------- interaction ---------- */
+  var downX = 0, downY = 0, downT = 0;
+
+  function findGift(cx, cy, withClear) {
+    for (var i = hitRects.length - 1; i >= 0; i--) {
+      var r = hitRects[i];
+      if (withClear && r.cx0 !== undefined &&
+          cx >= r.cx0 && cx <= r.cx1 && cy >= r.cy0 && cy <= r.cy1) {
+        return { rect: r, clear: true };
+      }
+      if (cx >= r.x0 - 4 && cx <= r.x1 + 4 && cy >= r.y0 - 4 && cy <= r.y1 + 4) {
+        return { rect: r, clear: false };
+      }
+    }
+    return null;
+  }
+
+  function openPicker(slot) {
+    pendingSlot = slot;
+    photoInput.value = '';
+    photoInput.click();
+  }
+
   function pointerDown(e) {
+    var target = findGift(e.clientX, e.clientY, true);
+    if (target) {
+      if (target.clear) clearPhoto(target.rect.i);
+      else openPicker(target.rect.i);
+      dragging = false;
+      return;
+    }
     dragging = true;
     vel = 0;
     lastX = e.clientX;
     lastMoveT = performance.now();
+    downX = e.clientX;
+    downY = e.clientY;
+    downT = performance.now();
     canvas.classList.add('dragging');
     if (canvas.setPointerCapture) {
       try { canvas.setPointerCapture(e.pointerId); } catch (err) {}
     }
   }
   function pointerMove(e) {
-    if (!dragging) return;
+    if (!dragging) {
+      canvas.style.cursor = findGift(e.clientX, e.clientY, true) ? 'pointer' : 'grab';
+      return;
+    }
     var now = performance.now();
     var dx = e.clientX - lastX;
     lastX = e.clientX;
@@ -562,6 +753,24 @@
     dragging = false;
     canvas.classList.remove('dragging');
   }
+
+  photoInput.addEventListener('change', function () {
+    var f = photoInput.files && photoInput.files[0];
+    if (f && pendingSlot >= 0) processPhoto(pendingSlot, f);
+    pendingSlot = -1;
+  });
+
+  canvas.addEventListener('dragover', function (e) { e.preventDefault(); });
+  canvas.addEventListener('drop', function (e) {
+    e.preventDefault();
+    var f = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
+    if (!f) return;
+    var target = findGift(e.clientX, e.clientY, false);
+    if (target) processPhoto(target.rect.i, f);
+  });
+
+  window.addEventListener('dragover', function (e) { e.preventDefault(); });
+  window.addEventListener('drop', function (e) { e.preventDefault(); });
 
   canvas.addEventListener('pointerdown', pointerDown);
   window.addEventListener('pointermove', pointerMove, { passive: true });
@@ -626,6 +835,7 @@
     document.body.removeChild(a);
   });
 
+  restorePhotos();
   resize();
   requestAnimationFrame(frame);
 })();
